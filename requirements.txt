@@ -2,3 +2,4 @@ streamlink
 jsonschema
 pathvalidate
 requests
+windows-curses; sys_platform == "win32"
