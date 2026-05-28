@@ -44,7 +44,9 @@ def _prompt_input(stdscr, prompt):
     curses.echo()
     curses.curs_set(1)
     stdscr.move(h - 2, 2 + len(prompt))
-    val = stdscr.getstr(h - 2, 2 + len(prompt), w - len(prompt) - 4).decode().strip()
+    stdscr.timeout(-1)  # block while typing; the 1s refresh timeout injects junk bytes
+    val = stdscr.getstr(h - 2, 2 + len(prompt), w - len(prompt) - 4).decode(errors='ignore').strip()
+    stdscr.timeout(1000)
     curses.noecho()
     curses.curs_set(0)
     return val
