@@ -84,8 +84,12 @@ class Daemon(HTTPServer):
         for entry in self.watched_streamers.values():
             entry['watcher'].quit()
         self.pool.shutdown(wait=False)
-        self.server_close()
-        threading.Thread(target=self.shutdown, daemon=True).start()
+
+        def _stop():
+            self.shutdown()
+            self.server_close()
+
+        threading.Thread(target=_stop, daemon=True).start()
         return 'Daemon exited.'
 
     def _check_streams(self):
