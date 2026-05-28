@@ -94,10 +94,17 @@ class Daemon(HTTPServer):
         if user_ids:
             try:
                 streams_info = twitch.get_stream_info(*user_ids)
+                live_now = set()
                 for stream_info in streams_info:
-                    name = stream_info['user_name'].lower()
+                    name = stream_info.get('user_login') or stream_info['user_name'].lower()
                     if name in self.streamers:
                         self.streamers[name]['stream_info'] = stream_info
+                        live_now.add(name)
+
+                # drop stale stream_info so offline streamers don't stay marked live
+                for name, info in self.streamers.items():
+                    if name not in live_now:
+                        info.pop('stream_info', None)
 
                 live = [
                     name for name, info in self.streamers.items()
