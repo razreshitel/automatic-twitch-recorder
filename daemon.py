@@ -6,7 +6,14 @@ from http.server import HTTPServer
 from pathlib import Path
 
 import twitch
-from utils import get_client_id, StreamQualities, get_saved_streamers, save_streamers
+from utils import (
+    get_client_id,
+    StreamQualities,
+    get_saved_streamers,
+    save_streamers,
+    get_saved_download_folder,
+    save_download_folder,
+)
 from watcher import Watcher
 
 log = logging.getLogger(__name__)
@@ -21,7 +28,7 @@ class Daemon(HTTPServer):
         super().__init__(server_address, RequestHandlerClass)
         self.streamers = {}
         self.watched_streamers = {}
-        self.download_folder = DEFAULT_DOWNLOAD_FOLDER
+        self.download_folder = get_saved_download_folder() or DEFAULT_DOWNLOAD_FOLDER
         self.kill = False
         self.started = False
         self.pool = ThreadPoolExecutor()
@@ -106,8 +113,9 @@ class Daemon(HTTPServer):
         return f'Check interval set to {self.check_interval} seconds.'
 
     def set_download_folder(self, path):
-        self.download_folder = path
-        return f"Download folder set to '{path}'."
+        self.download_folder = os.path.expanduser(path)
+        save_download_folder(self.download_folder)
+        return f"Download folder set to '{self.download_folder}'."
 
     def _persist(self):
         entries = {name: info.get('active', False) for name, info in self.streamers.items()}

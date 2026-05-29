@@ -90,7 +90,10 @@ class ATRHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST, msg)
 
     def _cmd_state(self, args):
-        self._json(HTTPStatus.OK, json.dumps(self.server.get_state()))
+        self._json(HTTPStatus.OK, json.dumps({
+            'streamers': self.server.get_state(),
+            'download_folder': self.server.download_folder,
+        }))
 
     def _cmd_time(self, args):
         if not args:

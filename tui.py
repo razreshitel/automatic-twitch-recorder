@@ -18,10 +18,10 @@ def _api(cmd, *args):
         return f'Error: {e}'
 
 
-def _get_rows():
-    """Returns flat row list: active streamers, then watchlist, then [add new].
-
-    Each streamer row is a dict: {'name', 'active', 'live', 'recording'}.
+def _get_state():
+    """Returns (rows, download_folder); rows is active streamers, then
+    watchlist, then [add new]. Each streamer row is a dict:
+    {'name', 'active', 'live', 'recording'}.
     """
     try:
         r = requests.post(
@@ -29,14 +29,15 @@ def _get_rows():
             json={'cmd': 'state', 'args': []},
             timeout=1,
         )
-        state = json.loads(r.json().get('println', '[]'))
+        state = json.loads(r.json().get('println', '{}'))
+        streamers = state['streamers']
     except Exception:
-        return None
+        return None, ''
 
-    state.sort(key=lambda s: (not s['recording'], not s['live'], s['name']))
-    recording = [s for s in state if s['active']]
-    watchlist = [s for s in state if not s['active']]
-    return recording + watchlist + [_SENTINEL]
+    streamers.sort(key=lambda s: (not s['recording'], not s['live'], s['name']))
+    recording = [s for s in streamers if s['active']]
+    watchlist = [s for s in streamers if not s['active']]
+    return recording + watchlist + [_SENTINEL], state.get('download_folder', '')
 
 
 def _prompt_input(stdscr, prompt):
@@ -52,14 +53,16 @@ def _prompt_input(stdscr, prompt):
     return val
 
 
-def _draw(stdscr, rows, cursor, status):
+def _draw(stdscr, rows, cursor, status, folder):
     stdscr.erase()
     h, w = stdscr.getmaxyx()
 
     stdscr.addstr(1, 2, 'Automatic Twitch Recorder', curses.A_BOLD)
     stdscr.addstr(2, 2, '─' * min(25, w - 4))
+    if folder:
+        stdscr.addstr(3, 2, f'folder: {folder}'[:w - 4], curses.A_DIM)
 
-    y = 4
+    y = 5
     section = None
     for i, row in enumerate(rows):
         if row is _SENTINEL:
@@ -92,7 +95,7 @@ def _draw(stdscr, rows, cursor, status):
     if status:
         stdscr.addstr(h - 2, 2, status[:w - 4])
 
-    hint = '↑↓ / number — navigate    Enter — record on/off / add    D — remove    Q — quit'
+    hint = '↑↓ / number — navigate    Enter — record on/off / add    D — remove    F — folder    Q — quit'
     stdscr.addstr(h - 1, 2, hint[:w - 4], curses.A_DIM)
 
     stdscr.refresh()
@@ -106,13 +109,13 @@ def run(stdscr):
     status = ''
 
     while True:
-        rows = _get_rows()
+        rows, folder = _get_state()
         if rows is None:
             rows = [_SENTINEL]
             status = 'Daemon unreachable.'
 
         cursor = min(cursor, len(rows) - 1)
-        _draw(stdscr, rows, cursor, status)
+        _draw(stdscr, rows, cursor, status, folder)
 
         key = stdscr.getch()
         if key == -1:
@@ -147,6 +150,10 @@ def run(stdscr):
             row = rows[cursor]
             if row is not _SENTINEL:
                 status = _api('remove', row['name'])
+
+        elif key in (ord('f'), ord('F')):
+            new = _prompt_input(stdscr, 'Download folder (#streamer# → name):')
+            status = _api('download_folder', new) if new else ''
 
         elif key in (ord('q'), ord('Q')):
             break

@@ -100,5 +100,16 @@ def save_streamers(entries):
     _save_config()
 
 
+def get_saved_download_folder():
+    _ensure_config()
+    return _config.get('download_folder', '')
+
+
+def save_download_folder(path):
+    _ensure_config()
+    _config['download_folder'] = path
+    _save_config()
+
+
 def get_valid_filename(s):
     return sanitize_filename(str(s))
