@@ -25,6 +25,12 @@ class AtrCmd(cmd.Cmd):
     def help_remove(self):
         print('remove <streamer>  — remove streamer from watchlist, stops recording if active')
 
+    def do_record(self, line):
+        self._send('record', *line.split())
+
+    def help_record(self):
+        print('record <streamer> [off]  — start recording a streamer when live (or stop with off)')
+
     def do_list(self, line):
         self._send('list')
 

@@ -1,4 +1,6 @@
 import curses
+import json
+
 import requests
 
 _SENTINEL = object()  # marks the [add new] row
@@ -17,25 +19,24 @@ def _api(cmd, *args):
 
 
 def _get_rows():
-    """Returns list of (name_or_sentinel, is_live)."""
+    """Returns flat row list: active streamers, then watchlist, then [add new].
+
+    Each streamer row is a dict: {'name', 'active', 'live', 'recording'}.
+    """
     try:
         r = requests.post(
             'http://127.0.0.1:1234/cmd/',
-            json={'cmd': 'list', 'args': []},
+            json={'cmd': 'state', 'args': []},
             timeout=1,
         )
-        text = r.json().get('println', '')
+        state = json.loads(r.json().get('println', '[]'))
     except Exception:
         return None
 
-    live, offline = [], []
-    for line in text.split('\n'):
-        if line.startswith('Live: '):
-            live = [s.strip() for s in line[6:].split(',') if s.strip() and s.strip() != '—']
-        elif line.startswith('Offline: '):
-            offline = [s.strip() for s in line[9:].split(',') if s.strip() and s.strip() != '—']
-
-    return [(n, True) for n in live] + [(n, False) for n in offline] + [(_SENTINEL, False)]
+    state.sort(key=lambda s: (not s['recording'], not s['live'], s['name']))
+    recording = [s for s in state if s['active']]
+    watchlist = [s for s in state if not s['active']]
+    return recording + watchlist + [_SENTINEL]
 
 
 def _prompt_input(stdscr, prompt):
@@ -43,7 +44,6 @@ def _prompt_input(stdscr, prompt):
     stdscr.addstr(h - 2, 2, (prompt + ' ' * w)[:w - 3])
     curses.echo()
     curses.curs_set(1)
-    stdscr.move(h - 2, 2 + len(prompt))
     stdscr.timeout(-1)  # block while typing; the 1s refresh timeout injects junk bytes
     val = stdscr.getstr(h - 2, 2 + len(prompt), w - len(prompt) - 4).decode(errors='ignore').strip()
     stdscr.timeout(1000)
@@ -59,23 +59,40 @@ def _draw(stdscr, rows, cursor, status):
     stdscr.addstr(1, 2, 'Automatic Twitch Recorder', curses.A_BOLD)
     stdscr.addstr(2, 2, '─' * min(25, w - 4))
 
-    for i, (name, is_live) in enumerate(rows):
-        y = 4 + i
+    y = 4
+    section = None
+    for i, row in enumerate(rows):
+        if row is _SENTINEL:
+            wanted = 'Watchlist'
+        else:
+            wanted = 'Recording' if row['active'] else 'Watchlist'
+        if wanted != section:
+            section = wanted
+            if y < h - 3:
+                stdscr.addstr(y, 1, section, curses.A_BOLD | curses.A_DIM)
+                y += 1
+
         if y >= h - 3:
             break
         attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
-        if name is _SENTINEL:
+        if row is _SENTINEL:
             line = f'  {i + 1}.   [add new]'
-        elif is_live:
-            line = f'  {i + 1}. ★ {name:<22} recording'
         else:
-            line = f'  {i + 1}.   {name:<22} offline'
+            mark = '●' if row['live'] else '○'
+            if row['recording']:
+                state = 'live — recording'
+            elif row['active']:
+                state = 'live — starting…' if row['live'] else 'offline — waiting'
+            else:
+                state = 'live' if row['live'] else 'offline'
+            line = f'  {i + 1}. {mark} {row["name"]:<22} {state}'
         stdscr.addstr(y, 0, line.ljust(w - 1)[:w - 1], attr)
+        y += 1
 
     if status:
         stdscr.addstr(h - 2, 2, status[:w - 4])
 
-    hint = '↑↓ / number — navigate    Enter — select / add    D — remove    Q — quit'
+    hint = '↑↓ / number — navigate    Enter — record on/off / add    D — remove    Q — quit'
     stdscr.addstr(h - 1, 2, hint[:w - 4], curses.A_DIM)
 
     stdscr.refresh()
@@ -91,7 +108,7 @@ def run(stdscr):
     while True:
         rows = _get_rows()
         if rows is None:
-            rows = [(_SENTINEL, False)]
+            rows = [_SENTINEL]
             status = 'Daemon unreachable.'
 
         cursor = min(cursor, len(rows) - 1)
@@ -117,17 +134,19 @@ def run(stdscr):
             status = ''
 
         elif key in (curses.KEY_ENTER, ord('\n'), ord('\r')):
-            name, _ = rows[cursor]
-            if name is _SENTINEL:
+            row = rows[cursor]
+            if row is _SENTINEL:
                 new = _prompt_input(stdscr, 'Streamer name:')
                 status = _api('add', new) if new else ''
+            elif row['active']:
+                status = _api('record', row['name'], 'off')
             else:
-                status = _api('remove', name)
+                status = _api('record', row['name'])
 
         elif key in (ord('d'), ord('D')):
-            name, _ = rows[cursor]
-            if name is not _SENTINEL:
-                status = _api('remove', name)
+            row = rows[cursor]
+            if row is not _SENTINEL:
+                status = _api('remove', row['name'])
 
         elif key in (ord('q'), ord('Q')):
             break

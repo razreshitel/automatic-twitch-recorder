@@ -26,10 +26,10 @@ class Daemon(HTTPServer):
         self.started = False
         self.pool = ThreadPoolExecutor()
         self.client_id = get_client_id()
-        for name in get_saved_streamers():
-            self.add_streamer(name)
+        for entry in get_saved_streamers():
+            self.add_streamer(entry['name'], active=entry['active'])
 
-    def add_streamer(self, streamer, quality=StreamQualities.BEST.value):
+    def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False):
         streamer = streamer.lower()
         valid_qualities = [q.value for q in StreamQualities]
         if quality not in valid_qualities:
@@ -42,9 +42,45 @@ class Daemon(HTTPServer):
         self.streamers[streamer] = {
             'preferred_quality': quality,
             'user_info': user_info[0],
+            'active': active,
         }
         self._persist()
         return True, [f"Added '{streamer}' to watchlist."]
+
+    def set_recording(self, streamer, active):
+        streamer = streamer.lower()
+
+        if streamer in self.watched_streamers:
+            if active:
+                return True, f"'{streamer}' is already recording."
+            entry = self.watched_streamers[streamer]
+            entry['watcher'].quit()
+            sd = entry['streamer_dict']
+            self.streamers[streamer] = {
+                'preferred_quality': sd['preferred_quality'],
+                'user_info': sd['user_info'],
+                'active': False,
+            }
+            self._persist()
+            return True, f"Stopped recording '{streamer}'."
+
+        if streamer in self.streamers:
+            info = self.streamers[streamer]
+            info['active'] = active
+            self._persist()
+            if not active:
+                return True, f"'{streamer}' set to watch only."
+            try:
+                stream_info = twitch.get_stream_info(info['user_info']['id'])
+                if stream_info and stream_info[0].get('type') == 'live':
+                    info['stream_info'] = stream_info[0]
+                    self._start_watchers([streamer])
+                    return True, f"'{streamer}' is live — recording started."
+            except Exception as e:
+                log.error(f'Live check failed: {e}')
+            return True, f"'{streamer}' will be recorded when live."
+
+        return False, f"'{streamer}' not found."
 
     def remove_streamer(self, streamer):
         streamer = streamer.lower()
@@ -74,10 +110,28 @@ class Daemon(HTTPServer):
         return f"Download folder set to '{path}'."
 
     def _persist(self):
-        save_streamers(list(self.streamers.keys()) + list(self.watched_streamers.keys()))
+        entries = {name: info.get('active', False) for name, info in self.streamers.items()}
+        for name in self.watched_streamers:
+            entries.setdefault(name, True)
+        save_streamers([{'name': n, 'active': a} for n, a in entries.items()])
 
     def get_streamers(self):
         return list(self.watched_streamers.keys()), list(self.streamers.keys())
+
+    def get_state(self):
+        rows = []
+        for name, info in self.streamers.items():
+            rows.append({
+                'name': name,
+                'active': bool(info.get('active')),
+                'live': info.get('stream_info', {}).get('type') == 'live',
+                'recording': False,
+            })
+        for name in self.watched_streamers:
+            if name in self.streamers:
+                continue  # deactivation in flight; the passive row is already listed
+            rows.append({'name': name, 'active': True, 'live': True, 'recording': True})
+        return rows
 
     def exit(self):
         self.kill = True
@@ -112,7 +166,7 @@ class Daemon(HTTPServer):
 
                 live = [
                     name for name, info in self.streamers.items()
-                    if info.get('stream_info', {}).get('type') == 'live'
+                    if info.get('active') and info.get('stream_info', {}).get('type') == 'live'
                 ]
                 self._start_watchers(live)
             except Exception as e:
@@ -145,7 +199,7 @@ class Daemon(HTTPServer):
             log.info(f'Finished recording {streamer}.')
 
         if not streamer_dict.get('kill'):
-            self.add_streamer(streamer, streamer_dict['preferred_quality'])
+            self.add_streamer(streamer, streamer_dict['preferred_quality'], active=True)
 
 
 if __name__ == '__main__':

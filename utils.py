@@ -83,13 +83,20 @@ def get_app_access_token():
 
 
 def get_saved_streamers():
+    """Returns [{'name': str, 'active': bool}]; accepts legacy plain-string entries."""
     _ensure_config()
-    return list(_config.get('streamers', []))
+    entries = []
+    for item in _config.get('streamers', []):
+        if isinstance(item, str):
+            entries.append({'name': item, 'active': False})
+        elif item.get('name'):
+            entries.append({'name': item['name'], 'active': bool(item.get('active'))})
+    return entries
 
 
-def save_streamers(names):
+def save_streamers(entries):
     _ensure_config()
-    _config['streamers'] = list(names)
+    _config['streamers'] = [{'name': e['name'], 'active': bool(e['active'])} for e in entries]
     _save_config()
 
 

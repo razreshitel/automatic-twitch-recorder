@@ -43,6 +43,8 @@ class ATRHandler(BaseHTTPRequestHandler):
             'list':            self._cmd_list,
             'add':             self._cmd_add,
             'remove':          self._cmd_remove,
+            'record':          self._cmd_record,
+            'state':           self._cmd_state,
             'time':            self._cmd_time,
             'download_folder': self._cmd_download_folder,
         }.get(payload['cmd'])
@@ -78,6 +80,17 @@ class ATRHandler(BaseHTTPRequestHandler):
             return
         ok, msg = self.server.remove_streamer(args[0])
         self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST, msg)
+
+    def _cmd_record(self, args):
+        if not args:
+            self._json(HTTPStatus.BAD_REQUEST, 'Missing streamer name.')
+            return
+        active = len(args) < 2 or args[1] != 'off'
+        ok, msg = self.server.set_recording(args[0], active)
+        self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST, msg)
+
+    def _cmd_state(self, args):
+        self._json(HTTPStatus.OK, json.dumps(self.server.get_state()))
 
     def _cmd_time(self, args):
         if not args:
