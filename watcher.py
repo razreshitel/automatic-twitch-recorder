@@ -1,9 +1,12 @@
 import datetime
+import logging
 import os
 
 import streamlink
 
 from utils import get_valid_filename
+
+log = logging.getLogger(__name__)
 
 
 class Watcher:
@@ -41,7 +44,8 @@ class Watcher:
                 return self.streamer_dict
 
             fallback = self.stream_quality if self.stream_quality in streams else list(streams.keys())[-1]
-            print(f"Quality '{self.stream_quality}' unavailable, falling back to '{fallback}'.")
+            log.info("Quality '%s' unavailable for %s, falling back to '%s'.",
+                     self.stream_quality, self.streamer, fallback)
             self.stream_quality = fallback
             self.streamer_dict['preferred_quality'] = fallback
             stream = streams[self.stream_quality]
@@ -49,7 +53,7 @@ class Watcher:
         if self.kill or self.cleanup or not stream:
             return self.streamer_dict
 
-        print(f'{self.streamer} is live. Recording {self.stream_quality} to {output_filepath}.')
+        log.info('%s is live. Recording %s to %s.', self.streamer, self.stream_quality, output_filepath)
 
         try:
             with open(output_filepath, 'ab') as out_file:
@@ -61,9 +65,9 @@ class Watcher:
                         break
                     out_file.write(data)
         except streamlink.StreamError as err:
-            print(f'StreamError: {err}')
+            log.warning('StreamError for %s: %s', self.streamer, err)
         except IOError as err:
-            print(f'Failed to write to file: {err}')
+            log.warning('Failed to write recording for %s: %s', self.streamer, err)
 
         self.streamer_dict['kill'] = self.kill
         self.streamer_dict['cleanup'] = self.cleanup

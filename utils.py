@@ -1,4 +1,5 @@
 import json
+import logging
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
@@ -7,10 +8,25 @@ import requests
 from pathvalidate import sanitize_filename
 
 CONFIG_FILE = Path(__file__).parent / 'config.json'
+LOG_FILE = Path(__file__).parent / 'atr.log'
 
 _config = None
 _app_access_token = ''
 _token_expiry = None
+
+
+def configure_logging(level=logging.INFO):
+    """Send all log output to atr.log. The TUI owns the terminal, so anything
+    written to stdout/stderr would corrupt the curses display; keep the console
+    clean by logging only to a file."""
+    root = logging.getLogger()
+    root.setLevel(level)
+    if any(getattr(h, '_atr', False) for h in root.handlers):
+        return  # already configured
+    handler = logging.FileHandler(LOG_FILE, encoding='utf-8')
+    handler._atr = True
+    handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    root.addHandler(handler)
 
 
 class StreamQualities(Enum):
