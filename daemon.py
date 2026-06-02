@@ -205,25 +205,35 @@ class Daemon(HTTPServer):
                 watcher = Watcher(streamer_dict, self.download_folder)
                 self.watched_streamers[name] = {'watcher': watcher, 'streamer_dict': streamer_dict}
                 if not self.kill:
-                    self.pool.submit(watcher.watch).add_done_callback(self._watcher_done)
+                    fut = self.pool.submit(watcher.watch)
+                    fut.add_done_callback(lambda f, n=name: self._watcher_done(n, f))
 
-    def _watcher_done(self, future):
-        streamer_dict = future.result()
-        if not streamer_dict:
-            return
-        streamer = streamer_dict['user_info']['login']
+    def _watcher_done(self, name, future):
+        try:
+            streamer_dict = future.result()
+        except Exception as e:
+            # A watcher that raised would otherwise leave name stuck in
+            # watched_streamers forever (shown as "recording", never retried).
+            log.exception('Recording for %s crashed: %s', name, e)
+            streamer_dict = None
+
         with self._lock:
-            self.watched_streamers.pop(streamer, None)
+            self.watched_streamers.pop(name, None)
+
+        if streamer_dict is None:
+            if not self.kill:
+                self.add_streamer(name, active=True)  # keep watching; retry when live again
+            return
 
         if streamer_dict.get('cleanup'):
             path = streamer_dict.get('output_filepath', '')
             if path and os.path.exists(path):
                 os.remove(path)
         else:
-            log.info('Finished recording %s.', streamer)
+            log.info('Finished recording %s.', name)
 
         if not streamer_dict.get('kill'):
-            self.add_streamer(streamer, streamer_dict['preferred_quality'], active=True)
+            self.add_streamer(name, streamer_dict['preferred_quality'], active=True)
 
 
 if __name__ == '__main__':
