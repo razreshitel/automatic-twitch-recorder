@@ -1,7 +1,7 @@
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from http.server import HTTPServer
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from watcher import Watcher
 log = logging.getLogger(__name__)
 
 DEFAULT_DOWNLOAD_FOLDER = str(Path.home() / 'streams' / '#streamer#')
+SHUTDOWN_DRAIN_TIMEOUT = 10  # seconds to let recordings flush and close on exit
 
 
 class Daemon(HTTPServer):
@@ -155,8 +156,15 @@ class Daemon(HTTPServer):
         with self._lock:
             self.kill = True
             watchers = [entry['watcher'] for entry in self.watched_streamers.values()]
+            futures = [entry['future'] for entry in self.watched_streamers.values()
+                       if entry.get('future')]
         for watcher in watchers:
             watcher.quit()
+        # Let active recordings notice the quit flag, flush their buffer, and
+        # close the file cleanly rather than dying mid-write. Bounded so a
+        # wedged stream cannot hang shutdown.
+        if futures:
+            wait(futures, timeout=SHUTDOWN_DRAIN_TIMEOUT)
         self.pool.shutdown(wait=False)
 
         def _stop():
@@ -203,10 +211,12 @@ class Daemon(HTTPServer):
             if name not in self.watched_streamers:
                 streamer_dict = self.streamers.pop(name)
                 watcher = Watcher(streamer_dict, self.download_folder)
-                self.watched_streamers[name] = {'watcher': watcher, 'streamer_dict': streamer_dict}
+                entry = {'watcher': watcher, 'streamer_dict': streamer_dict, 'future': None}
+                self.watched_streamers[name] = entry
                 if not self.kill:
                     fut = self.pool.submit(watcher.watch)
                     fut.add_done_callback(lambda f, n=name: self._watcher_done(n, f))
+                    entry['future'] = fut
 
     def _watcher_done(self, name, future):
         try:
