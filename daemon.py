@@ -2,7 +2,7 @@ import logging
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait
-from http.server import HTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import twitch
@@ -22,7 +22,7 @@ DEFAULT_DOWNLOAD_FOLDER = str(Path.home() / 'streams' / '#streamer#')
 SHUTDOWN_DRAIN_TIMEOUT = 10  # seconds to let recordings flush and close on exit
 
 
-class Daemon(HTTPServer):
+class Daemon(ThreadingHTTPServer):
     check_interval = 30
 
     def __init__(self, server_address, RequestHandlerClass):
