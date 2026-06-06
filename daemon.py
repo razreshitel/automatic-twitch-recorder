@@ -39,23 +39,40 @@ class Daemon(ThreadingHTTPServer):
         self.started = False
         self.pool = ThreadPoolExecutor()
         self.client_id = get_client_id()
-        for entry in get_saved_streamers():
-            self.add_streamer(entry['name'], active=entry['active'])
+        self._load_saved_streamers()
 
-    def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False):
+    def _load_saved_streamers(self):
+        entries = get_saved_streamers()
+        names = [e['name'] for e in entries]
+        # One helix/users request covers up to 100 logins; the old per-streamer
+        # loop fired one request each on startup.
+        info_map = {}
+        if names:
+            try:
+                for info in twitch.get_user_info(*names):
+                    info_map[info['login'].lower()] = info
+            except Exception as e:
+                log.error('Startup user lookup failed: %s', e)
+        for e in entries:
+            self.add_streamer(e['name'], active=e['active'],
+                              user_info=info_map.get(e['name'].lower()))
+
+    def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False, user_info=None):
         streamer = streamer.lower()
         valid_qualities = [q.value for q in StreamQualities]
         if quality not in valid_qualities:
             return False, [f"Invalid quality '{quality}'.", f"Options: {valid_qualities}"]
 
-        user_info = twitch.get_user_info(streamer)
-        if not user_info:
-            return False, [f"Streamer '{streamer}' not found."]
+        if user_info is None:
+            found = twitch.get_user_info(streamer)
+            if not found:
+                return False, [f"Streamer '{streamer}' not found."]
+            user_info = found[0]
 
         with self._lock:
             self.streamers[streamer] = {
                 'preferred_quality': quality,
-                'user_info': user_info[0],
+                'user_info': user_info,
                 'active': active,
             }
             self._persist()
