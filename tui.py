@@ -1,5 +1,4 @@
 import curses
-import json
 
 import requests
 
@@ -29,7 +28,7 @@ def _get_state():
             json={'cmd': 'state', 'args': []},
             timeout=1,
         )
-        state = json.loads(r.json().get('println', '{}'))
+        state = r.json().get('data') or {}
         streamers = state['streamers']
     except Exception:
         return None, ''

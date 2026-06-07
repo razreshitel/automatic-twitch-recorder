@@ -18,11 +18,18 @@ class ATRHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
-    def _json(self, status, message):
+    def _json(self, status, message='', data=None):
+        body = {
+            'ok': status == HTTPStatus.OK,
+            'message': message,
+            'println': message,  # back-compat: the CLI prints this field
+        }
+        if data is not None:
+            body['data'] = data
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        self.wfile.write(json.dumps({'println': message}).encode())
+        self.wfile.write(json.dumps(body).encode())
 
     def do_POST(self):
         if self.path != '/cmd/':
@@ -90,10 +97,10 @@ class ATRHandler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST, msg)
 
     def _cmd_state(self, args):
-        self._json(HTTPStatus.OK, json.dumps({
+        self._json(HTTPStatus.OK, data={
             'streamers': self.server.get_state(),
             'download_folder': self.server.download_folder,
-        }))
+        })
 
     def _cmd_time(self, args):
         if not args:
