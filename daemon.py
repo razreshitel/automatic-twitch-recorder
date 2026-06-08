@@ -54,7 +54,9 @@ class Daemon(ThreadingHTTPServer):
             except Exception as e:
                 log.error('Startup user lookup failed: %s', e)
         for e in entries:
-            self.add_streamer(e['name'], active=e['active'],
+            # Recording selection is deliberately not restored: the app always
+            # starts with an empty recording list, everything in the watchlist.
+            self.add_streamer(e['name'], active=False,
                               user_info=info_map.get(e['name'].lower()))
 
     def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False, user_info=None):
