@@ -5,7 +5,8 @@ import utils
 from daemon import Daemon
 from tui import main as run_tui
 
-if __name__ == '__main__':
+
+def main():
     utils.configure_logging()
     utils.get_client_id()
     server = Daemon(('127.0.0.1', 1234), ATRHandler.ATRHandler)
@@ -13,3 +14,7 @@ if __name__ == '__main__':
     server.start()  # begin polling immediately
     run_tui()
     server.exit()
+
+
+if __name__ == '__main__':
+    main()

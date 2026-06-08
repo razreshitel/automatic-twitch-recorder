@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "automatic-twitch-recorder"
+version = "0.2.0"
+description = "Watches Twitch streamers and records selected ones via streamlink."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlink",
+    "jsonschema",
+    "pathvalidate",
+    "requests",
+    "windows-curses; sys_platform == 'win32'",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+atr = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "daemon", "watcher", "twitch", "utils", "ATRHandler", "atr_cmd", "tui"]
