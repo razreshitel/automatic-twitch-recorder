@@ -18,7 +18,7 @@ from watcher import Watcher
 
 log = logging.getLogger(__name__)
 
-DEFAULT_DOWNLOAD_FOLDER = str(Path.home() / 'streams' / '#streamer#')
+DEFAULT_DOWNLOAD_FOLDER = str(Path(os.environ.get('SystemDrive', 'C:') + os.sep) / 'streams' / '#streamer#')
 SHUTDOWN_DRAIN_TIMEOUT = 10  # seconds to let recordings flush and close on exit
 
 
