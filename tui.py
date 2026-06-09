@@ -151,7 +151,7 @@ def run(stdscr):
                 status = _api('remove', row['name'])
 
         elif key in (ord('f'), ord('F')):
-            new = _prompt_input(stdscr, 'Download folder (#streamer# → name):')
+            new = _prompt_input(stdscr, 'Download folder (#streamer# → streamer name):')
             status = _api('download_folder', new) if new else ''
 
         elif key in (ord('q'), ord('Q')):
