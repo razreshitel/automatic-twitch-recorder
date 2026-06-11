@@ -59,7 +59,8 @@ class Daemon(ThreadingHTTPServer):
             self.add_streamer(e['name'], active=False,
                               user_info=info_map.get(e['name'].lower()))
 
-    def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False, user_info=None):
+    def add_streamer(self, streamer, quality=StreamQualities.BEST.value, active=False,
+                     user_info=None, check_live=False):
         streamer = streamer.lower()
         valid_qualities = [q.value for q in StreamQualities]
         if quality not in valid_qualities:
@@ -78,7 +79,34 @@ class Daemon(ThreadingHTTPServer):
                 'active': active,
             }
             self._persist()
+
+        if check_live:
+            live = self._refresh_live(streamer)
+            return True, [f"Added '{streamer}' to watchlist ({'live now' if live else 'offline'})."]
         return True, [f"Added '{streamer}' to watchlist."]
+
+    def _refresh_live(self, streamer):
+        """Query Twitch for one streamer's current status and update its
+        stream_info. Returns True if live. Network call is made outside the lock."""
+        with self._lock:
+            info = self.streamers.get(streamer)
+            if not info:
+                return False
+            user_id = info['user_info']['id']
+        try:
+            stream_info = twitch.get_stream_info(user_id)
+        except Exception as e:
+            log.error('Live check failed for %s: %s', streamer, e)
+            return False
+        live = bool(stream_info) and stream_info[0].get('type') == 'live'
+        with self._lock:
+            info = self.streamers.get(streamer)
+            if info is not None:
+                if live:
+                    info['stream_info'] = stream_info[0]
+                else:
+                    info.pop('stream_info', None)
+        return live
 
     def set_recording(self, streamer, active):
         streamer = streamer.lower()

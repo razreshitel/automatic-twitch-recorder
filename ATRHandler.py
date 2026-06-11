@@ -78,7 +78,7 @@ class ATRHandler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, 'Missing streamer name.')
             return
         quality = args[1] if len(args) > 1 else 'best'
-        ok, resp = self.server.add_streamer(args[0], quality)
+        ok, resp = self.server.add_streamer(args[0], quality, check_live=True)
         self._json(HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST, '\n'.join(resp))
 
     def _cmd_remove(self, args):
