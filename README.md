@@ -1,7 +1,6 @@
 # automatic-twitch-recorder
 
 Watches Twitch streamers and records the ones you select via [streamlink](https://streamlink.github.io).
-Fork of the discontinued [Instinctlol/automatic-twitch-recorder](https://github.com/Instinctlol/automatic-twitch-recorder).
 
 ## Setup
 
