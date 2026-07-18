@@ -1,6 +1,8 @@
 import datetime
 import logging
 import os
+import shutil
+import subprocess
 import time
 
 import streamlink
@@ -13,6 +15,19 @@ log = logging.getLogger(__name__)
 CHUNK_SIZE = 256 * 1024      # bytes read per iteration; 1 KB was needlessly CPU-heavy
 RECONNECT_DELAY = 5          # seconds to wait before reopening after a dropped stream
 MAX_RECONNECTS = 5           # consecutive failed reopen attempts before giving up
+FFMPEG_SHUTDOWN_TIMEOUT = 15
+
+
+def _find_ffmpeg():
+    candidates = [shutil.which('ffmpeg')]
+    for env_name in ('ProgramFiles', 'ProgramFiles(x86)'):
+        root = os.environ.get(env_name)
+        if root:
+            candidates.append(os.path.join(root, 'Streamlink', 'ffmpeg', 'ffmpeg.exe'))
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    raise FileNotFoundError('FFmpeg was not found. Install Streamlink or add ffmpeg to PATH.')
 
 
 class Watcher:
@@ -25,6 +40,7 @@ class Watcher:
         self.stream_quality = streamer_dict['preferred_quality']
         self.url = f'https://www.twitch.tv/{self.streamer_login}'
         self.download_folder = download_folder
+        self.ffmpeg = _find_ffmpeg()
         self.kill = False
         self.cleanup = False
 
@@ -67,53 +83,121 @@ class Watcher:
             log.warning('Live check failed for %s: %s', self.streamer, err)
             return True  # be optimistic; the next open attempt decides
 
+    def _record_part(self, fd, output_filepath):
+        command = [
+            self.ffmpeg,
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-nostdin',
+            '-fflags', '+genpts',
+            '-i', 'pipe:0',
+            '-map', '0:v:0?',
+            '-map', '0:a:0?',
+            '-c', 'copy',
+            '-avoid_negative_ts', 'make_zero',
+            '-cluster_time_limit', '2000',
+            '-f', 'matroska',
+            '-n',
+            output_filepath,
+        ]
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+        except OSError:
+            fd.close()
+            raise
+        read_error = None
+        stderr_bytes = b''
+        try:
+            while not self.kill and not self.cleanup:
+                data = fd.read(CHUNK_SIZE)
+                if not data:
+                    break
+                process.stdin.write(data)
+        except (BrokenPipeError, OSError, streamlink.StreamError) as err:
+            read_error = err
+        finally:
+            try:
+                fd.close()
+            except Exception:
+                pass
+            try:
+                process.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+            process.stdin = None
+            try:
+                _, stderr_bytes = process.communicate(timeout=FFMPEG_SHUTDOWN_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                process.terminate()
+                try:
+                    _, stderr_bytes = process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    _, stderr_bytes = process.communicate()
+
+        return_code = process.returncode
+        stderr = stderr_bytes.decode('utf-8', errors='replace').strip()
+        if read_error:
+            log.warning('Read error for %s: %s', self.streamer, read_error)
+        if return_code:
+            log.warning('FFmpeg failed for %s with code %d: %s',
+                        self.streamer, return_code, stderr or 'unknown error')
+
+        return os.path.exists(output_filepath) and os.path.getsize(output_filepath) > 0
+
     def watch(self):
         timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H.%M.%S')
-        filename = f"{timestamp} - {self.streamer} - {get_valid_filename(self.stream_title)}.ts"
+        filename_stem = f"{timestamp} - {self.streamer} - {get_valid_filename(self.stream_title)}"
         directory = self.download_folder.replace('#streamer#', self.streamer_login)
         os.makedirs(directory, exist_ok=True)
-        output_filepath = os.path.join(directory, filename)
-        self.streamer_dict['output_filepath'] = output_filepath
-
-        log.info('%s is live. Recording %s to %s.', self.streamer, self.stream_quality, output_filepath)
+        self.streamer_dict['output_filepaths'] = []
 
         wrote_any = False
         failures = 0
-        with open(output_filepath, 'ab') as out_file:
-            while not self.kill and not self.cleanup:
-                fd = self._open_stream()
-                if fd is None:
-                    if not self._still_live():
-                        break  # stream ended for real
-                    failures += 1
-                    if failures > MAX_RECONNECTS:
-                        log.warning('Giving up on %s after %d failed reopen attempts.',
-                                    self.streamer, failures)
-                        break
-                    time.sleep(RECONNECT_DELAY)
-                    continue
-
-                failures = 0
-                try:
-                    while not self.kill and not self.cleanup:
-                        data = fd.read(CHUNK_SIZE)
-                        if not data:
-                            break  # stream dropped or ended
-                        out_file.write(data)
-                        wrote_any = True
-                except (OSError, streamlink.StreamError) as err:
-                    log.warning('Read error for %s: %s', self.streamer, err)
-                finally:
-                    try:
-                        fd.close()
-                    except Exception:
-                        pass
-
-                if self.kill or self.cleanup or not self._still_live():
+        part_number = 1
+        while not self.kill and not self.cleanup:
+            fd = self._open_stream()
+            if fd is None:
+                if not self._still_live():
+                    break  # stream ended
+                failures += 1
+                if failures > MAX_RECONNECTS:
+                    log.warning('Giving up on %s after %d failed reopen attempts.',
+                                self.streamer, failures)
                     break
-                # Brief drop while still live — reopen and keep appending to the same file.
-                log.info('%s stream dropped, reconnecting…', self.streamer)
                 time.sleep(RECONNECT_DELAY)
+                continue
+
+            suffix = '' if part_number == 1 else f' - part {part_number:02d}'
+            output_filepath = os.path.join(directory, f'{filename_stem}{suffix}.mkv')
+            self.streamer_dict['output_filepath'] = output_filepath
+            log.info('%s is live. Recording %s to %s.',
+                     self.streamer, self.stream_quality, output_filepath)
+
+            part_written = self._record_part(fd, output_filepath)
+            if part_written:
+                self.streamer_dict['output_filepaths'].append(output_filepath)
+                wrote_any = True
+                failures = 0
+                part_number += 1
+            else:
+                failures += 1
+                if os.path.exists(output_filepath):
+                    os.remove(output_filepath)
+                if failures > MAX_RECONNECTS:
+                    log.warning('Giving up on %s after %d failed recording attempts.',
+                                self.streamer, failures)
+                    break
+
+            if self.kill or self.cleanup or not self._still_live():
+                break
+            log.info('%s stream dropped, starting a new part.', self.streamer)
+            time.sleep(RECONNECT_DELAY)
 
         if not wrote_any:
             self.cleanup = True  # nothing captured; let the daemon delete the empty file

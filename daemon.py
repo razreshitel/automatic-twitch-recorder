@@ -283,9 +283,12 @@ class Daemon(ThreadingHTTPServer):
             return
 
         if streamer_dict.get('cleanup'):
-            path = streamer_dict.get('output_filepath', '')
-            if path and os.path.exists(path):
-                os.remove(path)
+            paths = streamer_dict.get('output_filepaths', [])
+            if not paths and streamer_dict.get('output_filepath'):
+                paths = [streamer_dict['output_filepath']]
+            for path in paths:
+                if os.path.exists(path):
+                    os.remove(path)
         else:
             log.info('Finished recording %s.', name)
 
