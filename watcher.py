@@ -95,8 +95,7 @@ class Watcher:
             '-map', '0:a:0?',
             '-c', 'copy',
             '-avoid_negative_ts', 'make_zero',
-            '-cluster_time_limit', '2000',
-            '-f', 'matroska',
+            '-f', 'mp4',
             '-n',
             output_filepath,
         ]
@@ -174,7 +173,7 @@ class Watcher:
                 continue
 
             suffix = '' if part_number == 1 else f' - part {part_number:02d}'
-            output_filepath = os.path.join(directory, f'{filename_stem}{suffix}.mkv')
+            output_filepath = os.path.join(directory, f'{filename_stem}{suffix}.mp4')
             self.streamer_dict['output_filepath'] = output_filepath
             log.info('%s is live. Recording %s to %s.',
                      self.streamer, self.stream_quality, output_filepath)
